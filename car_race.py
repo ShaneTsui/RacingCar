@@ -7,7 +7,7 @@ lr = 1.4
 lf = 1.4
 FPS = 50.0
 
-N = 20
+N = 30
 INF = float('inf')
 MAX_steer = pi
 MIN_steer = -pi
@@ -131,7 +131,7 @@ def Solve(ego_car, route, dt):
     theta_constrain = SX.sym('theta_constrain', N - 1)
     v_constrain = SX.sym('v_constrain', N - 1)
 
-    SCALE = 0.005
+    SCALE = 0.002
     for i in range(N-1):
         theta_diff = atan(tan(steer[i]) / 2) * v[i] * dt * SCALE
         # theta_diff = steer[i] * dt
@@ -152,10 +152,10 @@ def Solve(ego_car, route, dt):
         cost += 20/N**3 * (N-i)**4 * (y[i] - route[i][1]) ** 2
         # control cost
         if i < N-2:
-            cost += 1 * N * steer[i] ** 2
+            cost += 5 * N * steer[i] ** 2
             cost += 0.01 * N * a[i] ** 2
 
-            cost += 10 * N * (steer[i+1] - steer[i]) ** 2
+            cost += 20 * N * (steer[i+1] - steer[i]) ** 2
             # cost += 0.1 * N * (a[i + 1] - a[i]) ** 2
 
     nlp = {'x': all_vars,
@@ -188,7 +188,7 @@ def Solve(ego_car, route, dt):
 
 
 def build_long_term_larget(track, ind, pos, dt):
-    desired_v = 60
+    desired_v = 80
     dist_travel = desired_v * dt
 
     def get_point(start, end, d_to_go):
