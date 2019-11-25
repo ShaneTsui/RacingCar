@@ -7,12 +7,12 @@ lr = 1.4
 lf = 1.4
 FPS = 50.0
 
-N = 3
+N = 10
 INF = float('inf')
 MAX_steer = pi
 MIN_steer = -pi
-MAX_a = 20
-MIN_a = -20
+MAX_a = 10
+MIN_a = -10
 MAX_v = 100
 MIN_v = 0
 
@@ -20,6 +20,7 @@ MIN_v = 0
 def bycicle_model(x, y, theta, v,
                   wheel, a, dt):
     beta = atan(lr/(lr + lf) * tan(wheel))
+    beta = 0
 
     v_ = v + a * dt
     x_ = x + v_ * cos(theta + beta) * dt
@@ -90,7 +91,7 @@ def Solve(ego_car, route, dt):
     theta_init = [ego_car.theta] * N
     v_init = [ego_car.v] * N
     steer_init = [ego_car.steer] * (N - 1)
-    a_init = [ego_car.a] * (N - 1)
+    a_init = [MAX_a] * (N - 1)
     initial_value = x_init + y_init + theta_init + v_init +\
                     steer_init + a_init
 
@@ -130,10 +131,14 @@ def Solve(ego_car, route, dt):
     theta_constrain = SX.sym('theta_constrain', N - 1)
     v_constrain = SX.sym('v_constrain', N - 1)
 
+    SCALE = 0.001
     for i in range(N-1):
-        x_constrain[i] = x[i + 1] - (x[i] + v[i] * np.cos(theta[i]))
-        y_constrain[i] = y[i + 1] - (y[i] + v[i] * np.sin(theta[i]))
-        theta_constrain[i] = theta[i + 1] - (theta[i] - steer[i] * dt)
+        theta_diff = atan(tan(steer[i]) / 2) * v[i] * dt * SCALE
+        # theta_diff = steer[i] * dt
+
+        x_constrain[i] = x[i + 1] - (x[i] + v[i] * dt * np.cos(theta[i]))
+        y_constrain[i] = y[i + 1] - (y[i] + v[i] * dt * np.sin(theta[i]))
+        theta_constrain[i] = theta[i + 1] - (theta[i] - theta_diff)
         v_constrain[i] = v[i + 1] - (v[i] + a[i] * dt)
     all_constrain = vertcat(x_constrain, y_constrain, theta_constrain, v_constrain)
     ub_constrains_g = np.zeros([4 * (N - 1)])
@@ -143,15 +148,15 @@ def Solve(ego_car, route, dt):
     cost = 0
     for i in range(N - 1):
         # deviation
-        cost += 1 * (x[i + 1] - route[i][0]) ** 2
-        cost += 1 * (y[i + 1] - route[i][1]) ** 2
+        cost += 20/N**2 * (N-i)**4 * (x[i + 1] - route[i][0]) ** 2
+        cost += 20/N**2 * (N-i)**4 * (y[i + 1] - route[i][1]) ** 2
         # control cost
-        # cost += 0 * steer[i] ** 2
-        # cost += 10 * a[i] ** 2
-        # smooth control
-        # if i < N-2:
-        #     cost += 0 * (steer[i+1] - steer[i]) ** 2
-        #     cost += 0 * (a[i + 1] - a[i]) ** 2
+        cost += 1 * N * steer[i] ** 2
+        cost += 0.01 * N * a[i] ** 2
+        if i < N-2:
+            cost += 5 * N * (steer[i+1] - steer[i]) ** 2
+            cost += 1 * N * (a[i + 1] - a[i]) ** 2
+        # cost += -1 * a[i]
 
     nlp = {'x': all_vars,
            'f': cost,
@@ -166,12 +171,16 @@ def Solve(ego_car, route, dt):
         print('x', result['x'][0:N])
         print('route_y', [i[1] for i in route])
         print('y', result['x'][N:2*N])
+
         print('theta', result['x'][2*N:3*N])
         print('v', result['x'][3*N:4*N])
+        print('vx', result['x'][3*N:4*N] * np.cos(result['x'][2*N:3*N]))
+        print('vy', result['x'][3*N:4*N] * np.sin(result['x'][2*N:3*N]))
+
         print('steer', result['x'][4*N:5*N-1])
         print('a', result['x'][5*N-1:6*N-2])
 
-    print_result()
+    # print_result()
     steer = float(result['x'][4*N+1])
     a = float(result['x'][5*N])
 
@@ -188,7 +197,9 @@ def main():
     dt = 1/FPS
     prev_a = MAX_a
     prev_steer = 0
-    while True:
+
+    total_reward = 0
+    for i in range(1000):
         print('########################')
 
         ind = env.unwrapped.tile_visited_count
@@ -200,30 +211,32 @@ def main():
         # long_term_target = [target] * N
 
         x, y = car.hull.position
-        dx, dy = w.linearVelocity * 10
-        theta = atan2(dy, dx)
+        vx, vy = w.linearVelocity * 1
+        theta = atan2(vy, vx)
         dtheta = 0
-        obs = x, y, theta, dx, dy, dtheta, target
+        obs = x, y, theta, vy, vx, dtheta, target
 
         # action = control(obs)
-        # _, _, done, _ = env.step(action)
-        # print(action)
+        # _, r, done, _ = env.step(action)
+        # print(action, r)
 
         ego_car = Car(obs, (prev_a, prev_steer))
-        print(obs)
-        a, steer = Solve(ego_car, long_term_target, dt * 0.1)
+        a, steer = Solve(ego_car, long_term_target, dt)
         prev_a, prev_steer = a, steer
         print(a, steer)
 
-        a = a / MAX_a
-        steer = -steer
+        a = a / (MAX_a)
+        steer = steer / (MAX_steer)
         if a > 0:
-            action = steer, a, 0
+            action = steer, a / 10, 0
         else:
             action = steer, 0, -a
-        _, _, done, _ = env.step(action)
+        _, r, done, _ = env.step(action)
+        total_reward += r
 
         env.render()
+
+    print(total_reward)
 
 
 if __name__ == '__main__':
