@@ -7,7 +7,7 @@ lr = 1.4
 lf = 1.4
 FPS = 50.0
 
-N = 10
+N = 20
 INF = float('inf')
 MAX_steer = pi
 MIN_steer = -pi
@@ -131,7 +131,7 @@ def Solve(ego_car, route, dt):
     theta_constrain = SX.sym('theta_constrain', N - 1)
     v_constrain = SX.sym('v_constrain', N - 1)
 
-    SCALE = 0.001
+    SCALE = 0.005
     for i in range(N-1):
         theta_diff = atan(tan(steer[i]) / 2) * v[i] * dt * SCALE
         # theta_diff = steer[i] * dt
@@ -146,17 +146,17 @@ def Solve(ego_car, route, dt):
 
     # define cost function f
     cost = 0
-    for i in range(N - 1):
+    for i in range(N):
         # deviation
-        cost += 20/N**2 * (N-i)**4 * (x[i + 1] - route[i][0]) ** 2
-        cost += 20/N**2 * (N-i)**4 * (y[i + 1] - route[i][1]) ** 2
+        cost += 20/N**3 * (N-i)**4 * (x[i] - route[i][0]) ** 2
+        cost += 20/N**3 * (N-i)**4 * (y[i] - route[i][1]) ** 2
         # control cost
-        cost += 1 * N * steer[i] ** 2
-        cost += 0.01 * N * a[i] ** 2
         if i < N-2:
-            cost += 5 * N * (steer[i+1] - steer[i]) ** 2
-            cost += 1 * N * (a[i + 1] - a[i]) ** 2
-        # cost += -1 * a[i]
+            cost += 1 * N * steer[i] ** 2
+            cost += 0.01 * N * a[i] ** 2
+
+            cost += 10 * N * (steer[i+1] - steer[i]) ** 2
+            # cost += 0.1 * N * (a[i + 1] - a[i]) ** 2
 
     nlp = {'x': all_vars,
            'f': cost,
@@ -187,6 +187,47 @@ def Solve(ego_car, route, dt):
     return a, steer
 
 
+def build_long_term_larget(track, ind, pos, dt):
+    desired_v = 60
+    dist_travel = desired_v * dt
+
+    def get_point(start, end, d_to_go):
+        x0, y0 = start
+        x1, y1 = end
+        dy = y1-y0
+        dx = x1-x0
+        d = np.linalg.norm((dx, dy))
+
+        x = x0+d_to_go*dx/d
+        y = y0+d_to_go*dy/d
+
+        return np.array((x, y))
+
+    cur_pos = np.array(pos)
+    ind = ind % len(track)
+    cur_target = np.array(track[ind][2:4])
+
+    result = [pos]
+    for i in range(N-1):
+        remain_dist = np.linalg.norm(cur_target - cur_pos) - dist_travel
+        if remain_dist > 0:
+            p = get_point(cur_pos, cur_target, dist_travel)
+            result.append(p)
+            cur_pos = p
+        else:
+            # must ensure distance between 2 target points larger than dist_travel
+            cur_pos = cur_target
+            ind = (ind + 1) % len(track)
+            cur_target = np.array(track[ind][2:4])
+
+            p = get_point(cur_pos, cur_target, -remain_dist)
+            result.append(p)
+            cur_pos = p
+    return result
+
+
+
+
 def main():
     env = gym.make('CarRacing-v0')
     done = False
@@ -199,15 +240,15 @@ def main():
     prev_steer = 0
 
     total_reward = 0
-    for i in range(1000):
+    for i in range(1000000):
         print('########################')
 
         ind = env.unwrapped.tile_visited_count
         ind = ind % len(env.unwrapped.track)
         target = env.unwrapped.track[ind][2:4]
 
-        long_term_target = [env.unwrapped.track[i % len(env.unwrapped.track)][2:4]
-                            for i in range(ind, ind+N)]
+        # long_term_target = [env.unwrapped.track[i % len(env.unwrapped.track)][2:4]
+        #                     for i in range(ind, ind+N)]
         # long_term_target = [target] * N
 
         x, y = car.hull.position
@@ -216,6 +257,12 @@ def main():
         dtheta = 0
         obs = x, y, theta, vy, vx, dtheta, target
 
+        long_term_target = build_long_term_larget(env.unwrapped.track, ind, (x, y), dt)
+        # a = np.array(long_term_target[0])
+        # b = np.array(long_term_target[1])
+        # print(long_term_target)
+        # print(np.linalg.norm(a-b), 70*dt)
+
         # action = control(obs)
         # _, r, done, _ = env.step(action)
         # print(action, r)
@@ -223,10 +270,10 @@ def main():
         ego_car = Car(obs, (prev_a, prev_steer))
         a, steer = Solve(ego_car, long_term_target, dt)
         prev_a, prev_steer = a, steer
-        print(a, steer)
+        print(a, steer, np.linalg.norm((vx, vy)))
 
         a = a / (MAX_a)
-        steer = steer / (MAX_steer)
+        steer = steer #/ (MAX_steer)
         if a > 0:
             action = steer, a / 10, 0
         else:
