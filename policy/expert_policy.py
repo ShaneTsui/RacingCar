@@ -1,7 +1,7 @@
 import gym
-from math import sqrt, sin, cos, tan, atan, atan2, pi
+from math import tan, atan, atan2
 from casadi import *
-
+from core.Car import Car
 
 lr = 1.4
 lf = 1.4
@@ -17,74 +17,8 @@ MAX_v = 100
 MIN_v = 0
 
 
-def bycicle_model(x, y, theta, v,
-                  wheel, a, dt):
-    beta = atan(lr/(lr + lf) * tan(wheel))
-    beta = 0
-
-    v_ = v + a * dt
-    x_ = x + v_ * cos(theta + beta) * dt
-    y_ = y + v_ * sin(theta + beta) * dt
-
-    return x_, y_
-
-
-def bycicle_model_derivative(theta, v,
-                             wheel, a, dt):
-    beta = atan(lr/(lr + lf) * tan(wheel))
-    dx_a = cos(theta + beta) * (dt ** 2)
-    dy_a = sin(theta + beta) * (dt ** 2)
-
-    tmp = lr / (lr + lf) * tan(wheel)
-    dbeta = 1 / (1 + tmp ** 2) * (lr / (lr + lf) / (cos(wheel) ** 2))
-
-    v_ = v + a * dt
-    dx_wheel = - v_ * sin(theta + beta) * dt * dbeta
-    dy_wheel = v_ * cos(theta + beta) * dt * dbeta
-
-    return dx_a, dx_wheel, dy_a, dy_wheel
-
-
-def control(obs):
-    x, y, theta, dx, dy, dtheta, target = obs
-    x_target, y_target = target
-    dt = 1/FPS
-    v = sqrt(dx ** 2 + dy ** 2)
-
-    wheel, a = 0, 0
-    for i in range(100):
-        # gradient descent
-        x_, y_ = bycicle_model(x, y, theta, v, wheel, a, dt)
-        dx_a, dx_wheel, dy_a, dy_wheel = \
-            bycicle_model_derivative(theta, v, wheel, a, dt)
-
-        a = a-(x_ - x_target) * dx_a - (y_ - y_target) * dy_a
-        wheel = wheel-(x_ - x_target) * dx_wheel - (y_ - y_target) * dy_wheel
-
-    wheel = -wheel/(500*pi)
-    if a > 0:
-        return wheel, a, 0
-    else:
-        return wheel, 0, -a
-
-
-
-class Car(object):
-
-    def __init__(self, obs, control):
-        x, y, theta, dx, dy, dtheta, target = obs
-        self.x = x
-        self.y = y
-        self.theta = theta
-        self.v = np.linalg.norm((dx, dy))
-
-        a, steer = control
-        self.steer = steer
-        self.a = a
-
-
 # tracking problem solver
-def Solve(ego_car, route, dt):
+def mpc_policy(ego_car: Car, route, dt):
     # initial state
     x_init = [ego_car.x] * N
     y_init = [ego_car.y] * N
@@ -180,14 +114,13 @@ def Solve(ego_car, route, dt):
         print('steer', result['x'][4*N:5*N-1])
         print('a', result['x'][5*N-1:6*N-2])
 
-    # print_result()
     steer = float(result['x'][4*N+1])
     a = float(result['x'][5*N])
 
     return a, steer
 
 
-def build_long_term_larget(track, ind, pos, dt):
+def build_long_term_target(waypoints, curr_waypoint_idx, pos: tuple, dt):
     desired_v = 80
     dist_travel = desired_v * dt
 
@@ -204,8 +137,8 @@ def build_long_term_larget(track, ind, pos, dt):
         return np.array((x, y))
 
     cur_pos = np.array(pos)
-    ind = ind % len(track)
-    cur_target = np.array(track[ind][2:4])
+    curr_waypoint_idx = curr_waypoint_idx % len(waypoints)
+    cur_target = np.array(waypoints[curr_waypoint_idx][2:4])
 
     result = [pos]
     for i in range(N-1):
@@ -217,8 +150,8 @@ def build_long_term_larget(track, ind, pos, dt):
         else:
             # must ensure distance between 2 target points larger than dist_travel
             cur_pos = cur_target
-            ind = (ind + 1) % len(track)
-            cur_target = np.array(track[ind][2:4])
+            curr_waypoint_idx = (curr_waypoint_idx + 1) % len(waypoints)
+            cur_target = np.array(waypoints[curr_waypoint_idx][2:4])
 
             p = get_point(cur_pos, cur_target, -remain_dist)
             result.append(p)
@@ -226,15 +159,13 @@ def build_long_term_larget(track, ind, pos, dt):
     return result
 
 
-
-
 def main():
     env = gym.make('CarRacing-v0')
-    done = False
 
     env.reset()
     car = env.unwrapped.car
     w = car.wheels[0]
+    waypoints = env.unwrapped.track
     dt = 1/FPS
     prev_a = MAX_a
     prev_steer = 0
@@ -243,32 +174,18 @@ def main():
     for i in range(1000000):
         print('########################')
 
-        ind = env.unwrapped.tile_visited_count
-        ind = ind % len(env.unwrapped.track)
-        target = env.unwrapped.track[ind][2:4]
-
-        # long_term_target = [env.unwrapped.track[i % len(env.unwrapped.track)][2:4]
-        #                     for i in range(ind, ind+N)]
-        # long_term_target = [target] * N
-
+        # Previous state
         x, y = car.hull.position
         vx, vy = w.linearVelocity * 1
         theta = atan2(vy, vx)
-        dtheta = 0
-        obs = x, y, theta, vy, vx, dtheta, target
+        obs = x, y, theta, vy, vx
 
-        long_term_target = build_long_term_larget(env.unwrapped.track, ind, (x, y), dt)
-        # a = np.array(long_term_target[0])
-        # b = np.array(long_term_target[1])
-        # print(long_term_target)
-        # print(np.linalg.norm(a-b), 70*dt)
-
-        # action = control(obs)
-        # _, r, done, _ = env.step(action)
-        # print(action, r)
+        ind = env.unwrapped.tile_visited_count
+        ind = ind % len(env.unwrapped.track)
+        long_term_target = build_long_term_target(waypoints, ind, (x, y), dt)
 
         ego_car = Car(obs, (prev_a, prev_steer))
-        a, steer = Solve(ego_car, long_term_target, dt)
+        a, steer = mpc_policy(ego_car, long_term_target, dt)
         prev_a, prev_steer = a, steer
         print(a, steer, np.linalg.norm((vx, vy)))
 
@@ -278,6 +195,8 @@ def main():
             action = steer, a / 10, 0
         else:
             action = steer, 0, -a
+
+        # Take action
         _, r, done, _ = env.step(action)
         total_reward += r
 
