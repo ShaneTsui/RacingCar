@@ -3,41 +3,44 @@ from math import atan2
 import numpy as np
 
 from core.car import Car
-from DAgger import MAX_a
-from utils import singleton
+from core.action import Action
+# from utils import singleton
 
 
-@singleton
+# @singleton
 class Environment:
 
     def __init__(self, env, FPS=50.0):
         self.env = env
-        self.car = Car(env.unwrapped.car, MAX_a, 0)
-        self.wheel = self.car.wheels[0]
+        self.env.reset()
+        self.car = Car(env.unwrapped.car, 10., 0.)
         self.waypoints = env.unwrapped.track
         self.dt = 1 / FPS
         self.long_term_planning_length = 30
+        self.short_term_planning_length = 5
 
-    def _observe(self):
-        x, y = self.car.hull.position
-        vx, vy = self.wheel.linearVelocity * 1
+    def observe(self):
+        x, y = self.car.get_position()
+        vx, vy = self.car.get_wheel().linearVelocity * 1
         theta = atan2(vy, vx)
         return x, y, vx, vy, theta
 
-    def step(self, accel, steer):
-        obs = self._observe()
-        _, reward, done, _ = self.env.step(accel, steer)
-        self.car.take_control(accel, steer)
+    def step(self, control: Action):
+        obs = self.observe()
+        _, reward, done, _ = self.env.step(control.to_tuple())
+        self.car.take_control(control)
         return obs, reward, done
 
     def reset(self):
-        return self.env.reset()
+        state = self.env.reset()
+        self.car = Car(self.env.unwrapped.car, 10, 0)
+        return state
 
     def calc_long_term_targets(self):
         curr_waypoint_idx = self.env.unwrapped.tile_visited_count
         curr_waypoint_idx = curr_waypoint_idx % len(self.env.unwrapped.track)
 
-        pos = self.car.hull.position
+        pos = self.car.get_position()
         desired_v = 80
         dist_travel = desired_v * self.dt
 
@@ -74,7 +77,10 @@ class Environment:
                 result.append(p)
                 cur_pos = p
 
-        xs = result['x'][0:self.long_term_planning_length].elements()
-        ys = result['x'][self.long_term_planning_length:2 * self.long_term_planning_length].elements()
+        # xs = result['x'][0:self.long_term_planning_length].elements()
+        # ys = result['x'][self.long_term_planning_length:2 * self.long_term_planning_length].elements()
 
-        return [(x, y) for x, y in zip(xs, ys)]
+        xs = [i[0] for i in result]
+        ys = [i[1] for i in result]
+
+        return xs, ys
