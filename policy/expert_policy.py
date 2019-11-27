@@ -121,10 +121,15 @@ def long_term_MPC(ego_car: Car, route, dt, N):
     # print_result()
     steer = float(result['x'][4 * N + 1])
     a = float(result['x'][5 * N])
-    x = result['x'][0:N].elements()
-    y = result['x'][N:2 * N].elements()
+    planned_waypoints = result['x'][0:2*N].elements()
 
-    return a, steer, x, y
+    a = a / MAX_a
+    if a > 0:
+        action = steer, a / 10, 0
+    else:
+        action = steer, 0, -a
+
+    return action, planned_waypoints
 
 
 def short_term_MPC(ego_car: Car, route, dt, N):
@@ -221,9 +226,15 @@ def short_term_MPC(ego_car: Car, route, dt, N):
     # print_result()
     steer = float(result['x'][4 * N + 1])
     a = float(result['x'][5 * N])
-    x = result['x'][0:N].elements()
-    y = result['x'][N:2 * N].elements()
-    return a, steer, x, y
+    a = a / MAX_a
+    if a > 0:
+        action = steer, a / 10, 0
+    else:
+        action = steer, 0, -a
+
+    planned_waypoints = result['x'][0:2*N].elements()
+
+    return action, planned_waypoints
 
 
 def build_long_term_larget(track, ind, pos, dt, N):

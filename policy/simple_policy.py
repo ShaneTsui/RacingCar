@@ -1,5 +1,7 @@
 from torch import nn as nn
 from torch.nn import functional as F
+from core.dataset import Dataset
+
 
 class PolicyNetwork(nn.Module):
     def __init__(self, state_dim, action_dim):
@@ -20,3 +22,9 @@ class PolicyNetwork(nn.Module):
         x = F.relu(self.linear1(state))
         x = self.linear2(x)
         return x
+
+    def is_converged(self):
+        raise NotImplementedError()
+
+    def save(self, save_path):
+        pass

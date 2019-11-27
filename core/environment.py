@@ -33,7 +33,7 @@ class Environment:
     def reset(self):
         return self.env.reset()
 
-    def build_long_term_target(self):
+    def calc_long_term_targets(self):
         curr_waypoint_idx = self.env.unwrapped.tile_visited_count
         curr_waypoint_idx = curr_waypoint_idx % len(self.env.unwrapped.track)
 
@@ -76,4 +76,5 @@ class Environment:
 
         xs = result['x'][0:self.long_term_planning_length].elements()
         ys = result['x'][self.long_term_planning_length:2 * self.long_term_planning_length].elements()
+
         return [(x, y) for x, y in zip(xs, ys)]
