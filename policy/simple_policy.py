@@ -25,6 +25,3 @@ class PolicyNetwork(nn.Module):
 
     def is_converged(self):
         raise NotImplementedError()
-
-    def save(self, save_path):
-        pass

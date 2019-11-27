@@ -1,3 +1,5 @@
+import pickle
+
 class Dataset:
 
     def __init__(self, batch_size=128):
@@ -31,3 +33,7 @@ class Dataset:
         dataset.inputs = self.inputs + other.inputs
         dataset.outputs = self.outputs + other.outputs
         return dataset
+
+    def save(self, save_path='./init_dataset.pkl'):
+        with open(save_path, 'wb') as f:
+            pickle.dump({"inputs": self.inputs, "outputs":self.outputs}, f)

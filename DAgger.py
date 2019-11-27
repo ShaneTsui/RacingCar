@@ -20,7 +20,6 @@ MIN_a = -10
 MAX_v = 100
 MIN_v = 0
 
-
 class DAgger:
 
     def __init__(self, env: Environment, lr=0.01):
@@ -35,10 +34,10 @@ class DAgger:
                                           self.short_term_planning_length * 2).cuda()
         self.optimizer = optim.Adam(self.policy_layer.parameters(), lr=lr)
 
-        self.init_dataset_size = 10
-        self.dataset_prime_size = 10
-        self.M = 1
-        self.waypoints_threshhold = 10  # TODO: Hyperparam
+        self.init_dataset_size = 20000
+        self.dataset_prime_size = 1000
+        self.M = 5
+        self.waypoints_threshhold = 1
 
     def _to_absolute_coords(self, xs, ys, combine=True):
         car_x, car_y, _, _, theta = self.env.observe()
@@ -76,9 +75,8 @@ class DAgger:
 
         return xs_coords + ys_coords
 
-    def init_dataset(self):
+    def init_dataset(self, save=True):
         dataset = Dataset()
-        step = 0
         while dataset.size() < self.init_dataset_size:
             done = False
             self.env.reset()
@@ -91,8 +89,8 @@ class DAgger:
                                                                  expert_ys[:self.short_term_planning_length])
                 dataset.record(rel_long_term_waypoints, rel_planned_waypoints)
                 _, _, done = self.env.step(action)
-                print(step)
-                step += 1
+        if save:
+            dataset.save()
         return dataset
 
     def _measure_waypoints_diff(self, pnts1, pnts2):
@@ -123,7 +121,7 @@ class DAgger:
         while True:
             # Train Policy NN with D
             self._train(dataset)
-
+            round = 0
             # Run Policy NN + label with LT-MPC
             dataset_prime = Dataset()
             step = 0
@@ -131,7 +129,6 @@ class DAgger:
             while not done and dataset_prime.size() < self.dataset_prime_size:
                 self.env.reset()
                 while not done and dataset_prime.size() < self.dataset_prime_size:
-                    print(step)
                     long_term_xs, long_term_ys = self.env.calc_long_term_targets()
 
                     rel_long_term_waypoints = self._to_relative_coords(long_term_xs, long_term_ys)
@@ -143,9 +140,10 @@ class DAgger:
                                                               self.long_term_planning_length)
                         rel_expert_planned_waypoints = self._to_relative_coords(
                             expert_xs[:self.short_term_planning_length], expert_ys[:self.short_term_planning_length])
-
-                        if self._measure_waypoints_diff(rel_nn_planned_waypoints,
-                                                        rel_expert_planned_waypoints) > self.waypoints_threshhold:
+                        diff = self._measure_waypoints_diff(rel_nn_planned_waypoints,
+                                                            rel_expert_planned_waypoints)
+                        print(diff)
+                        if diff > self.waypoints_threshhold:
                             dataset_prime.record(rel_long_term_waypoints, rel_expert_planned_waypoints)
 
                     abs_nn_planned_xs, abs_nn_planned_ys = self._to_absolute_coords(
@@ -156,14 +154,15 @@ class DAgger:
                                                   self.short_term_planning_length)
                     _, _, done = self.env.step(action)
                     step += 1
+            round += 1
+            self.save("./saved/nn_policy_{}.h5".format(round))
 
             # add D' to D
             dataset += dataset_prime
 
-        # self.save()
 
     def save(self, save_path='./nn_policy.h5'):
-        self.policy_layer.save(save_path)
+        torch.save(self.policy_layer.state_dict(), save_path)
 
     def load(self):
         pass
