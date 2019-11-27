@@ -19,6 +19,9 @@ class Environment:
         self.long_term_planning_length = 30
         self.short_term_planning_length = 5
 
+    def render(self):
+        self.env.render()
+
     def observe(self):
         x, y = self.car.get_position()
         vx, vy = self.car.get_wheel().linearVelocity * 1
