@@ -7,3 +7,6 @@ class Action:
 
     def to_tuple(self):
         return self.steer, self.accel, self.brk
+
+    def __str__(self):
+        return "acc: {} , steer: {}, break: {}".format(self.accel, self.steer, self.brk)

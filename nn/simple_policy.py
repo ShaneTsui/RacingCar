@@ -1,6 +1,5 @@
 from torch import nn as nn
 from torch.nn import functional as F
-from core.dataset import Dataset
 
 
 class PolicyNetwork(nn.Module):

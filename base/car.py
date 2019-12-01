@@ -1,7 +1,7 @@
 from math import atan2
 import numpy as np
 
-from core.action import Action
+from base.action import Action
 
 
 class Car(object):
@@ -14,6 +14,10 @@ class Car(object):
         self.accel = a
         self.steer = steer
 
+    def get_velocity(self):
+        vx, vy = self.wheel.linearVelocity * 1
+        return np.linalg.norm((vx, vy))
+
     def get_wheel(self):
         return self.wheel
 
@@ -25,7 +29,7 @@ class Car(object):
         vx, vy = self.wheel.linearVelocity * 1.
         v = np.linalg.norm((vx, vy))
         theta = atan2(vy, vx)
-        return x, y, v, theta, float(self.accel), float(self.steer)
+        return x, y, v, theta, self.accel, self.steer
 
     def take_control(self, control: Action):
         self.accel = control.accel

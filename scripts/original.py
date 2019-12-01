@@ -1,5 +1,5 @@
 import gym
-from math import sqrt, sin, cos, tan, atan, atan2, pi
+from math import tan, atan, atan2
 from casadi import *
 from time import time
 
@@ -9,10 +9,10 @@ lf = 1.4
 FPS = 50.0
 
 INF = float('inf')
-MAX_steer = pi
-MIN_steer = -pi
-MAX_a = 10
-MIN_a = -10
+MAX_steer = pi / 2
+MIN_steer = -pi / 2
+MAX_a = 1
+MIN_a = -1
 MAX_v = 100
 MIN_v = 0
 
@@ -34,11 +34,11 @@ class Car(object):
 # tracking problem solver
 def long_term_MPC(ego_car, route, dt, N):
     # initial state
-    x_init = [ego_car_x] * N
-    y_init = [ego_car_y] * N
-    theta_init = [ego_car_theta] * N
-    v_init = [ego_car_v] * N
-    steer_init = [ego_car_steer] * (N - 1)
+    x_init = [ego_car.x] * N
+    y_init = [ego_car.y] * N
+    theta_init = [ego_car.theta] * N
+    v_init = [ego_car.v] * N
+    steer_init = [ego_car.steer] * (N - 1)
     a_init = [MAX_a] * (N - 1)
     initial_value = x_init + y_init + theta_init + v_init +\
                     steer_init + a_init
@@ -53,22 +53,22 @@ def long_term_MPC(ego_car, route, dt, N):
     all_vars = vertcat(x, y, theta, v, steer, a)
 
     # vars upper bound
-    ub_constrains_x = np.array([ego_car_x]+[INF] * (N-1))
-    ub_constrains_y = np.array([ego_car_y]+[INF] * (N-1))
-    ub_constrains_theta = np.array([ego_car_theta]+[INF] * (N-1))
-    ub_constrains_v = np.array([ego_car_v]+[MAX_v] * (N-1))
-    ub_constrains_steer = np.array([ego_car_steer]+[MAX_steer] * (N-2))
-    ub_constrains_a = np.array([ego_car_a]+[MAX_a] * (N-2))
+    ub_constrains_x = np.array([ego_car.x]+[INF] * (N-1))
+    ub_constrains_y = np.array([ego_car.y]+[INF] * (N-1))
+    ub_constrains_theta = np.array([ego_car.theta]+[INF] * (N-1))
+    ub_constrains_v = np.array([ego_car.v]+[MAX_v] * (N-1))
+    ub_constrains_steer = np.array([ego_car.steer]+[MAX_steer] * (N-2))
+    ub_constrains_a = np.array([ego_car.a]+[MAX_a] * (N-2))
     ub_constrains_vars = np.hstack([ub_constrains_x, ub_constrains_y,
                                     ub_constrains_theta, ub_constrains_v,
                                     ub_constrains_steer, ub_constrains_a])
     # vars lower bound
-    lb_constrains_x = np.array([ego_car_x]+[-INF] * (N-1))
-    lb_constrains_y = np.array([ego_car_y]+[-INF] * (N-1))
-    lb_constrains_theta = np.array([ego_car_theta]+[-INF] * (N-1))
-    lb_constrains_v = np.array([ego_car_v]+[-MIN_v] * (N-1))
-    lb_constrains_steer = np.array([ego_car_steer]+[MIN_steer] * (N-2))
-    lb_constrains_a = np.array([ego_car_a]+[MIN_a] * (N-2))
+    lb_constrains_x = np.array([ego_car.x]+[-INF] * (N-1))
+    lb_constrains_y = np.array([ego_car.y]+[-INF] * (N-1))
+    lb_constrains_theta = np.array([ego_car.theta]+[-INF] * (N-1))
+    lb_constrains_v = np.array([ego_car.v]+[-MIN_v] * (N-1))
+    lb_constrains_steer = np.array([ego_car.steer]+[MIN_steer] * (N-2))
+    lb_constrains_a = np.array([ego_car.a]+[MIN_a] * (N-2))
     lb_constrains_vars = np.hstack([lb_constrains_x, lb_constrains_y,
                                     lb_constrains_theta, lb_constrains_v,
                                     lb_constrains_steer, lb_constrains_a])
@@ -79,10 +79,10 @@ def long_term_MPC(ego_car, route, dt, N):
     theta_constrain = SX.sym('theta_constrain', N - 1)
     v_constrain = SX.sym('v_constrain', N - 1)
 
-    SCALE = 0.002
+    SCALE = 0.5
     for i in range(N-1):
-        theta_diff = atan(tan(steer[i]) / 2) * v[i] * dt * SCALE
-        # theta_diff = steer[i] * dt
+        # theta_diff = atan(tan(steer[i]) / 2) * v[i] * dt * SCALE
+        theta_diff = steer[i] * v[i] * dt * SCALE
 
         x_constrain[i] = x[i + 1] - (x[i] + v[i] * dt * np.cos(theta[i]))
         y_constrain[i] = y[i + 1] - (y[i] + v[i] * dt * np.sin(theta[i]))
@@ -96,14 +96,14 @@ def long_term_MPC(ego_car, route, dt, N):
     cost = 0
     for i in range(N):
         # deviation
-        cost += 20/N**3 * (N-i)**4 * (x[i] - route[i][0]) ** 2
-        cost += 20/N**3 * (N-i)**4 * (y[i] - route[i][1]) ** 2
+        cost += 20 * (x[i] - route[i][0]) ** 2
+        cost += 20 * (y[i] - route[i][1]) ** 2
         # control cost
         if i < N-2:
             cost += 5 * N * steer[i] ** 2
-            cost += 0.01 * N * a[i] ** 2
+            cost += 0.001 * N * a[i] ** 2
 
-            cost += 20 * N * (steer[i+1] - steer[i]) ** 2
+            cost += 100 * N * (steer[i+1] - steer[i]) ** 2
             # cost += 0.1 * N * (a[i + 1] - a[i]) ** 2
 
     nlp = {'x': all_vars,
@@ -139,11 +139,11 @@ def long_term_MPC(ego_car, route, dt, N):
 
 def short_term_MPC(ego_car, route, dt, N):
     # initial state
-    x_init = [ego_car_x] * N
-    y_init = [ego_car_y] * N
-    theta_init = [ego_car_theta] * N
-    v_init = [ego_car_v] * N
-    steer_init = [ego_car_steer] * (N - 1)
+    x_init = [ego_car.x] * N
+    y_init = [ego_car.y] * N
+    theta_init = [ego_car.theta] * N
+    v_init = [ego_car.v] * N
+    steer_init = [ego_car.steer] * (N - 1)
     a_init = [MAX_a] * (N - 1)
     initial_value = x_init + y_init + theta_init + v_init +\
                     steer_init + a_init
@@ -158,22 +158,22 @@ def short_term_MPC(ego_car, route, dt, N):
     all_vars = vertcat(x, y, theta, v, steer, a)
 
     # vars upper bound
-    ub_constrains_x = np.array([ego_car_x]+[INF] * (N-1))
-    ub_constrains_y = np.array([ego_car_y]+[INF] * (N-1))
-    ub_constrains_theta = np.array([ego_car_theta]+[INF] * (N-1))
-    ub_constrains_v = np.array([ego_car_v]+[MAX_v] * (N-1))
-    ub_constrains_steer = np.array([ego_car_steer]+[MAX_steer] * (N-2))
-    ub_constrains_a = np.array([ego_car_a]+[MAX_a] * (N-2))
+    ub_constrains_x = np.array([ego_car.x]+[INF] * (N-1))
+    ub_constrains_y = np.array([ego_car.y]+[INF] * (N-1))
+    ub_constrains_theta = np.array([ego_car.theta]+[INF] * (N-1))
+    ub_constrains_v = np.array([ego_car.v]+[MAX_v] * (N-1))
+    ub_constrains_steer = np.array([ego_car.steer]+[MAX_steer] * (N-2))
+    ub_constrains_a = np.array([ego_car.a]+[MAX_a] * (N-2))
     ub_constrains_vars = np.hstack([ub_constrains_x, ub_constrains_y,
                                     ub_constrains_theta, ub_constrains_v,
                                     ub_constrains_steer, ub_constrains_a])
     # vars lower bound
-    lb_constrains_x = np.array([ego_car_x]+[-INF] * (N-1))
-    lb_constrains_y = np.array([ego_car_y]+[-INF] * (N-1))
-    lb_constrains_theta = np.array([ego_car_theta]+[-INF] * (N-1))
-    lb_constrains_v = np.array([ego_car_v]+[-MIN_v] * (N-1))
-    lb_constrains_steer = np.array([ego_car_steer]+[MIN_steer] * (N-2))
-    lb_constrains_a = np.array([ego_car_a]+[MIN_a] * (N-2))
+    lb_constrains_x = np.array([ego_car.x]+[-INF] * (N-1))
+    lb_constrains_y = np.array([ego_car.y]+[-INF] * (N-1))
+    lb_constrains_theta = np.array([ego_car.theta]+[-INF] * (N-1))
+    lb_constrains_v = np.array([ego_car.v]+[-MIN_v] * (N-1))
+    lb_constrains_steer = np.array([ego_car.steer]+[MIN_steer] * (N-2))
+    lb_constrains_a = np.array([ego_car.a]+[MIN_a] * (N-2))
     lb_constrains_vars = np.hstack([lb_constrains_x, lb_constrains_y,
                                     lb_constrains_theta, lb_constrains_v,
                                     lb_constrains_steer, lb_constrains_a])
@@ -187,7 +187,7 @@ def short_term_MPC(ego_car, route, dt, N):
     SCALE = 0.002
     for i in range(N-1):
         theta_diff = atan(tan(steer[i]) / 2) * v[i] * dt * SCALE
-        # theta_diff = steer[i] * dt
+        # theta_diff = steer[i] * v[i] * dt * SCALE
 
         x_constrain[i] = x[i + 1] - (x[i] + v[i] * dt * np.cos(theta[i]))
         y_constrain[i] = y[i + 1] - (y[i] + v[i] * dt * np.sin(theta[i]))
@@ -235,7 +235,7 @@ def short_term_MPC(ego_car, route, dt, N):
 
 
 def build_long_term_larget(track, ind, pos, dt, N):
-    desired_v = 80
+    desired_v = 60
     dist_travel = desired_v * dt
 
     def get_point(start, end, d_to_go):
@@ -305,6 +305,13 @@ def main():
         t = time()
         a, steer, x, y = long_term_MPC(ego_car, long_term_target, dt, long_term_N)
         print('long term solve time:', time()-t)
+        from utils.vis import plot_waypoints
+        ltx, lty = [], []
+        for tx, ty in long_term_target:
+            ltx.append(tx)
+            lty.append(ty)
+        if i% 20 ==0:
+            plot_waypoints(ltx+lty, x + y)
 
         # short_term_N = 5
         # short_term_target = list(zip(x, y))[:short_term_N]
@@ -318,7 +325,7 @@ def main():
         a = a / MAX_a
         steer = steer
         if a > 0:
-            action = steer, a / 10, 0
+            action = steer, a / 5, 0
         else:
             action = steer, 0, -a
         _, r, done, _ = env.step(action)

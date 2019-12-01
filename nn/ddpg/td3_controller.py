@@ -1,4 +1,4 @@
-""" Learn a policy using ddpg for the reach task"""
+""" Learn a nn using ddpg for the reach task"""
 import copy
 import time
 import random
@@ -235,7 +235,7 @@ class TD3():
         critic_loss.backward()
         self.optimizer_critic.step()
 
-        # Delayed policy updates
+        # Delayed nn updates
         if step % self.policy_freq == 0:
 
             # Compute actor loss
@@ -262,8 +262,8 @@ class TD3():
     # TODO: Complete the function
     def train(self, num_steps, noise):
         """
-        Train the policy for the given number of iterations
-        :param num_steps:The number of steps to train the policy for
+        Train the nn for the given number of iterations
+        :param num_steps:The number of steps to train the nn for
         """
         returns = []
 
@@ -314,7 +314,7 @@ if __name__ == "__main__":
             batch_size=100,
             policy_freq=2
         )
-        # Train the policy
+        # Train the nn
         noise = GuassianNoise(mu=0, sigma=0.1)
         returns = td3_object.train(num_steps=200000, noise=noise)
 
@@ -324,7 +324,7 @@ if __name__ == "__main__":
         plt.savefig('td3_return_seed_{}.png'.format(seed))
         plt.clf()
 
-        # Evaluate the final policy
+        # Evaluate the final nn
         state = env.reset()
         done = False
         while not done:

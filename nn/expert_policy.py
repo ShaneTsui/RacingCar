@@ -1,11 +1,12 @@
 from math import tan, atan, atan2
+from pprint import pprint
 from time import time
 
 import gym
 from casadi import *
 
-from core.car import Car
-from core.action import Action
+from base.action import Action
+from base.car import Car
 
 lr = 1.4
 lf = 1.4
@@ -21,8 +22,9 @@ MIN_v = 0.
 
 
 # tracking problem solver
-def long_term_MPC(ego_car: Car, route_xs, route_ys, dt, N):
-
+def long_term_MPC(ego_car: Car, route_xs, route_ys, dt):
+    assert len(route_xs) == len(route_ys)
+    N = len(route_xs)
 
     ego_car_x, ego_car_y, ego_car_v, ego_car_theta, ego_car_a, ego_car_steer = ego_car.get_car_state()
 
@@ -121,11 +123,11 @@ def long_term_MPC(ego_car: Car, route_xs, route_ys, dt, N):
     #     print('a', result['x'][5 * N - 1:6 * N - 2])
 
     # print_result()
-    steer = float(result['x'][4 * N + 1])
-    a = float(result['x'][5 * N])
     xs = result['x'][0:N].elements()
     ys = result['x'][N:2*N].elements()
 
+    steer = float(result['x'][4 * N + 1])
+    a = float(result['x'][5 * N])
     a = a / MAX_a
     if a > 0:
         action = Action(steer, a / 10, 0)
@@ -135,7 +137,10 @@ def long_term_MPC(ego_car: Car, route_xs, route_ys, dt, N):
     return action, xs, ys
 
 
-def short_term_MPC(ego_car: Car, route_xs, route_ys, dt, N):
+def short_term_MPC(ego_car: Car, route_xs, route_ys, dt, verbose=False):
+    assert len(route_xs) == len(route_ys)
+    N = len(route_xs)
+
     ego_car_x, ego_car_y, ego_car_v, ego_car_theta, ego_car_a, ego_car_steer = ego_car.get_car_state()
 
     x_init = [ego_car_x] * N
@@ -234,8 +239,11 @@ def short_term_MPC(ego_car: Car, route_xs, route_ys, dt, N):
     else:
         action = Action(steer, 0, -a)
 
-    # xs = result['x'][0:N].elements()
-    # ys = result['x'][N:2*N].elements()
+    if verbose:
+        xs = result['x'][0:N].elements()
+        ys = result['x'][N:2 * N].elements()
+        pprint(xs)
+        pprint(ys)
 
     return action
 
