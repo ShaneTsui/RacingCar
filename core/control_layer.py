@@ -1,3 +1,5 @@
+from collections import deque
+from functools import reduce
 from math import pi
 from math import sqrt
 
@@ -8,7 +10,7 @@ import torch.optim as optim
 
 from base.control import Control
 from base.environment import Environment
-from dataset.action_dataset import ActionDataset
+from dataset.control_dataset import ControlDataset
 from nn.expert_policy import long_term_MPC
 from nn.simple_action import SimpleNetwork
 from utils.geo import to_relative_coords
@@ -24,15 +26,14 @@ MIN_v = 0
 
 
 class Test:
-    def __init__(self, env: Environment, action_layer=None):
+    def __init__(self, env: Environment, control_layer=None):
         self.env = env
         self.dt = self.env.dt
         self.long_term_planning_length = self.env.long_term_planning_length
-        self.action_layer = action_layer
-        self.expert = long_term_MPC
+        self.control_layer = control_layer
 
     def run(self):
-        self.action_layer.eval()
+        self.control_layer.eval()
         self.env.reset()
         done = False
         curr_pos = self.env.get_car().get_position()
@@ -41,10 +42,10 @@ class Test:
             while not done:
                 long_term_xs, long_term_ys = self.env.calc_long_term_targets()
                 car_x, car_y, _, _, theta = self.env.observe()
-                rel_long_term_waypoints = to_relative_coords(car_x, car_y, theta, long_term_xs, long_term_ys)
-                action = self.action_layer(torch.FloatTensor(rel_long_term_waypoints).cuda()).detach().cpu().numpy()
+                rel_long_term_targets = to_relative_coords(car_x, car_y, theta, long_term_xs, long_term_ys)
+                control_traj = self.control_layer(torch.FloatTensor(rel_long_term_targets).cuda()).detach().cpu().numpy()
 
-                _, _, done, _ = self.env.step(Control(action[0], action[1], action[2]))
+                _, _, done, _ = self.env.step(Control(control_traj[0], control_traj[1], control_traj[2]))
 
                 curr_pos = self.env.get_car().get_position()
                 dist = (curr_pos.x - prev_pos[0]) ** 2 + (curr_pos.y - prev_pos[1]) ** 2
@@ -57,7 +58,7 @@ class Test:
                 self.env.render()
 
 
-class ActionController:
+class ControlLayerLearner:
 
     def __init__(self, env: Environment, lr=0.01):
         self.env = env
@@ -65,42 +66,51 @@ class ActionController:
         self.long_term_planning_length = self.env.long_term_planning_length
         self.expert = long_term_MPC
 
-        self.action_layer = SimpleNetwork(self.long_term_planning_length * 2, 3).cuda()
-        self.optimizer = optim.Adam(self.action_layer.parameters(), lr=lr)
+        self.control_layer = SimpleNetwork(self.long_term_planning_length * 2, self.long_term_planning_length * 3).cuda()
+        self.optimizer = optim.Adam(self.control_layer.parameters(), lr=lr)
 
         self.init_dataset_size = 20000
         self.dataset_prime_size = 500
         self.M = 1
         self.waypoints_threshhold = 1e-3
-        self.epoches = 2000
+        self.epoches = 4000
 
     def init_dataset(self, save=True):
-        dataset = ActionDataset()
+        dataset = ControlDataset()
         cnt = 0
         while dataset.size() < self.init_dataset_size:
             done = False
             self.env.reset()
-            new_dataset = ActionDataset()
+            new_dataset = ControlDataset()
             curr_pos = self.env.get_car().get_position()
             prev_pos = (curr_pos.x - 10, curr_pos.y + 10)
             out_of_boundary = False
 
-            while not out_of_boundary and not done and dataset.size() < self.init_dataset_size:
-                target_xs, target_ys = self.env.calc_long_term_targets()
-                action, expert_long_term_xs, expert_long_term_ys = self.expert(self.env.car, target_xs, target_ys,
-                                                                               self.dt)
+            targets = deque(maxlen=self.long_term_planning_length)
+            controls = deque(maxlen=self.long_term_planning_length)
 
+            while not out_of_boundary and not done and dataset.size() < self.init_dataset_size:
+                # Input
+                target_xs, target_ys = self.env.calc_long_term_targets()
                 car_x, car_y, _, _, theta = self.env.observe()
                 rel_targets = to_relative_coords(car_x, car_y, theta, target_xs, target_ys)
-                rel_long_term_waypoints = to_relative_coords(car_x, car_y, theta, expert_long_term_xs,
-                                                             expert_long_term_ys)
-                new_dataset.record(action, rel_targets, rel_long_term_waypoints)
+                targets.append(rel_targets)
 
-                print("Dataset size: {}".format(cnt))
-                cnt += 1
+                # Output
+                control, expert_long_term_xs, expert_long_term_ys = self.expert(self.env.car, target_xs, target_ys, self.dt)
+                controls.append(control)
 
-                # Take action
-                obs, _, done, _ = self.env.step(action)
+                if len(controls) == N:
+                    target0 = targets[0]
+
+                    control_traj = tuple(reduce(lambda x, y: x + y, [c.to_tuple() for c in controls]))
+                    new_dataset.record(target0, control_traj)
+
+                    print("Dataset size: {}".format(cnt))
+                    cnt += 1
+
+                # Take control
+                obs, _, done, _ = self.env.step(control)
 
                 # Check if in lane
                 curr_pos = self.env.get_car().get_position()
@@ -120,8 +130,8 @@ class ActionController:
     def _measure_action_diff(self, pnts1, pnts2):
         return sqrt(sum([(a - b) ** 2 for a, b in zip(pnts1, pnts2)]))
 
-    def _train(self, dataset: ActionDataset):
-        self.action_layer.train()
+    def _train(self, dataset: ControlDataset):
+        self.control_layer.train()
         epoch = 0
         while epoch < self.epoches:
             batch = dataset.fetch_random_batch()
@@ -131,7 +141,7 @@ class ActionController:
             inputs = torch.FloatTensor(inputs).cuda()
             outputs = torch.FloatTensor(outputs).cuda()
 
-            outputs_pred = self.action_layer(inputs)
+            outputs_pred = self.control_layer(inputs)
             loss = F.mse_loss(outputs, outputs_pred)
             # if not epoch % 100:
             print("Epoch {}, loss: {}".format(epoch, loss))
@@ -143,14 +153,14 @@ class ActionController:
             epoch += 1
 
     def _test(self):
-        test = Test(self.env, self.action_layer)
+        test = Test(self.env, self.control_layer)
         test.run()
 
     def run_dagger(self, dataset_path=None):
 
         # Build Dataset
         if dataset_path:
-            dataset = ActionDataset()
+            dataset = ControlDataset()
             dataset.load(dataset_path)
         else:
             dataset = self.init_dataset()
@@ -164,7 +174,7 @@ class ActionController:
             return
 
             # Run Policy NN + label with LT-MPC
-            dataset_prime = ActionDataset()
+            dataset_prime = ControlDataset()
             step = 0
             curr_pos = self.env.get_car().get_position()
             prev_pos = (curr_pos.x - 10, curr_pos.y + 10)
@@ -220,7 +230,7 @@ class ActionController:
             dataset += dataset_prime
 
     def save(self, save_path):
-        torch.save(self.action_layer.state_dict(), save_path)
+        torch.save(self.control_layer.state_dict(), save_path)
 
 
 if __name__ == '__main__':
@@ -228,12 +238,13 @@ if __name__ == '__main__':
     env = Environment(env=env, FPS=50.0)
 
     model_dict = "../saved/action/nn_policy_0.h5"
-    action_layer = SimpleNetwork(60, 3).cuda()
-    action_layer.load_state_dict(torch.load(model_dict))
+    control_layer = SimpleNetwork(60, 90).cuda()
+    control_layer.load_state_dict(torch.load(model_dict))
 
-    test = Test(env, action_layer)
+    test = Test(env, control_layer)
     test.run()
 
-    # dagger = ActionController(env)
-    # dagger.run_dagger('../cache/action_dataset.pkl')
+    dagger = ControlLayerLearner(env)
+    # dagger.run_dagger()
+    dagger.run_dagger('../cache/control_dataset.pkl')
     # dagger.run_dagger("action_dataset.pkl")

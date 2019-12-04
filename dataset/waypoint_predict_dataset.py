@@ -1,7 +1,7 @@
 import pickle
 import random
 
-from base.action import Action
+from base.control import Control
 
 
 class WaypointPredictDataset:
@@ -24,7 +24,7 @@ class WaypointPredictDataset:
             pickle.dump({"actions": self.actions, "rel_targets": self.rel_targets,
                          "rel_long_term_waypoints": self.rel_long_term_waypoints}, f)
 
-    def record(self, action: Action, target, long_term_waypoint):
+    def record(self, action: Control, target, long_term_waypoint):
         self.actions.append(action)
         self.rel_targets.append(target)
         self.rel_long_term_waypoints.append(long_term_waypoint)

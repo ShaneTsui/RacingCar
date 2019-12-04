@@ -2,7 +2,7 @@ from math import atan2
 
 import numpy as np
 
-from base.action import Action
+from base.control import Control
 from base.car import Car
 
 
@@ -26,7 +26,7 @@ class Environment:
         theta = atan2(vy, vx)
         return x, y, vx, vy, theta
 
-    def step(self, control: Action):
+    def step(self, control: Control):
         obs = self.observe()
         _, reward, done, info = self.env.step(control.to_tuple())
         self.car.take_control(control)
@@ -54,7 +54,7 @@ class Environment:
 
         pos = self.car.get_position()
 
-        desired_v = 80
+        desired_v = 60
         dist_travel = desired_v * self.dt
 
         def get_point(start, end, d_to_go):

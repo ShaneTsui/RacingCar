@@ -1,7 +1,7 @@
 from math import atan2
 import numpy as np
 
-from base.action import Action
+from base.control import Control
 
 
 class Car(object):
@@ -31,6 +31,6 @@ class Car(object):
         theta = atan2(vy, vx)
         return x, y, v, theta, self.accel, self.steer
 
-    def take_control(self, control: Action):
+    def take_control(self, control: Control):
         self.accel = control.accel
         self.steer = control.steer

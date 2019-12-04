@@ -2,15 +2,16 @@ from torch import nn as nn
 from torch.nn import functional as F
 
 
-class ActionNetwork(nn.Module):
+class SimpleNetwork(nn.Module):
     def __init__(self, state_dim, action_dim):
         """
         Initialize the network
         param: state_dim : 2N = N + N (Xs + Ys)
         param: action_dim: 3, steer, accel, break
         """
-        super(ActionNetwork, self).__init__()
+        super(SimpleNetwork, self).__init__()
         self.linear1 = nn.Linear(state_dim, 256)
+        self.hidden = nn.Linear(256, 256)
         self.linear2 = nn.Linear(256, action_dim)
 
     def forward(self, state):
@@ -19,6 +20,7 @@ class ActionNetwork(nn.Module):
         param: state: The state of the environment
         """
         x = F.relu(self.linear1(state))
+        x = F.relu(self.hidden(x))
         x = self.linear2(x)
         return x
 

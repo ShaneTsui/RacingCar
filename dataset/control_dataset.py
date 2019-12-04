@@ -4,56 +4,51 @@ import random
 from base.control import Control
 
 
-class ActionDataset:
+class ControlDataset:
 
     def __init__(self, batch_size=512):
-        self.actions = []  # [(steer, accel, break)]
         self.rel_targets = []  # [rel_Xs | rel_Ys]
-        self.rel_long_term_waypoints = []  # [rel_Xs | rel_Ys]
+        self.controls = []  # [(steer, accel, break)]
         self.batch_size = batch_size
         self.idx = 0
 
     def load(self, save_path):
         with open(save_path, 'rb') as f:
             d = pickle.load(f)
-            self.actions += d['actions']
+            self.controls += d['controls']
             self.rel_targets += d['rel_targets']
-            self.rel_long_term_waypoints += d['rel_long_term_waypoints']
 
-    def save(self, save_path='../cache/action_dataset.pkl'):
+    def save(self, save_path='../cache/control_dataset.pkl'):
         with open(save_path, 'wb') as f:
-            pickle.dump({"actions": self.actions, "rel_targets": self.rel_targets,
-                         "rel_long_term_waypoints": self.rel_long_term_waypoints}, f)
+            pickle.dump({"controls": self.controls, "rel_targets": self.rel_targets}, f)
 
-    def record(self, action: Control, target, long_term_waypoint):
-        self.actions.append(action)
+    def record(self, target, control: Control):
+        self.controls.append(control)
         self.rel_targets.append(target)
-        self.rel_long_term_waypoints.append(long_term_waypoint)
 
     def size(self):
-        return len(self.actions)
+        return len(self.controls)
 
     def fetch_random_batch(self):
         self.rand_idx = [i for i in range(self.size())]
         idxes = random.choices(self.rand_idx, k=self.batch_size)
 
         x_batch = [self.rel_targets[i] for i in idxes]
-        y_batch = [self.actions[i].to_tuple() for i in idxes]
+        y_batch = [self.controls[i] for i in idxes]
 
         return x_batch, y_batch
 
     def __add__(self, other):
-        dataset = ActionDataset()
-        dataset.actions = self.actions + other.actions
+        dataset = ControlDataset()
+        dataset.controls = self.controls + other.controls
         dataset.rel_targets = self.rel_targets + other.rel_targets
-        dataset.rel_long_term_waypoints = self.rel_long_term_waypoints + other.rel_long_term_waypoints
         return dataset
 
 
 if __name__ == '__main__':
-    dataset = ActionDataset()
+    dataset = ControlDataset()
 
-    dataset.load('../action_dataset.pkl')
+    dataset.load('../cache/control_dataset.pkl')
     from utils.vis import plot_waypoints
 
     long_term, short_term = dataset.fetch_random_batch()

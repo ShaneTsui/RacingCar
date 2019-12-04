@@ -1,4 +1,4 @@
-class Action:
+class Control:
 
     def __init__(self, steer, accel, brk):
         self.steer = steer

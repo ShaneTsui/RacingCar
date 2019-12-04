@@ -5,7 +5,7 @@ from time import time
 import gym
 from casadi import *
 
-from base.action import Action
+from base.control import Control
 from base.car import Car
 
 lr = 1.4
@@ -130,11 +130,21 @@ def long_term_MPC(ego_car: Car, route_xs, route_ys, dt):
     a = float(result['x'][5 * N])
     a = a / MAX_a
     if a > 0:
-        action = Action(steer, a / 10, 0)
+        control = Control(steer, a / 10, 0)
     else:
-        action = Action(steer, 0, -a)
+        control = Control(steer, 0, -a)
 
-    return action, xs, ys
+    # controls = []
+    # for a, steer in zip(result['x'][5 * N - 1:6 * N - 2].elements(), result['x'][4 * N:5 * N - 1].elements()):
+    #     # steer = float(result['x'][4 * N + 1])
+    #     # a = float(result['x'][5 * N])
+    #     a = a / MAX_a
+    #     if a > 0:
+    #         controls.append(Control(steer, a / 10, 0))
+    #     else:
+    #         controls.append(Control(steer, 0, -a))
+
+    return control, xs, ys
 
 
 def short_term_MPC(ego_car: Car, route_xs, route_ys, dt, verbose=False):
@@ -190,8 +200,8 @@ def short_term_MPC(ego_car: Car, route_xs, route_ys, dt, verbose=False):
 
     SCALE = 0.002
     for i in range(N - 1):
-        theta_diff = atan(tan(steer[i]) / 2) * v[i] * dt * SCALE
-        # theta_diff = steer[i] * dt
+        # theta_diff = atan(tan(steer[i]) / 2) * v[i] * dt * SCALE
+        theta_diff = steer[i] * v[i] * dt * SCALE
 
         x_constrain[i] = x[i + 1] - (x[i] + v[i] * dt * np.cos(theta[i]))
         y_constrain[i] = y[i + 1] - (y[i] + v[i] * dt * np.sin(theta[i]))
@@ -205,8 +215,13 @@ def short_term_MPC(ego_car: Car, route_xs, route_ys, dt, verbose=False):
     cost = 0
     for i in range(N):
         # deviation
-        cost += (x[i] - route_xs[i]) ** 2
-        cost += (y[i] - route_ys[i]) ** 2
+        cost += 20 * N * (x[i] - route_xs[i]) ** 2
+        cost += 20 * N * (y[i] - route_ys[i]) ** 2
+
+        if i < N - 2:
+            cost += 1 * N * steer[i] ** 2
+            # cost += 0.01 * N * a[i] ** 2
+            cost += 50 * N * (steer[i + 1] - steer[i]) ** 2
 
     nlp = {'x': all_vars,
            'f': cost,
@@ -216,28 +231,13 @@ def short_term_MPC(ego_car: Car, route_xs, route_ys, dt, verbose=False):
     result = S(x0=initial_value, lbg=lb_constrains_g, ubg=ub_constrains_g,
                lbx=lb_constrains_vars, ubx=ub_constrains_vars)
 
-    # def print_result():
-    #     print('route_x', [i[0] for i in route])
-    #     print('x', result['x'][0:N])
-    #     print('route_y', [i[1] for i in route])
-    #     print('y', result['x'][N:2 * N])
-    #
-    #     print('theta', result['x'][2 * N:3 * N])
-    #     print('v', result['x'][3 * N:4 * N])
-    #     print('vx', result['x'][3 * N:4 * N] * np.cos(result['x'][2 * N:3 * N]))
-    #     print('vy', result['x'][3 * N:4 * N] * np.sin(result['x'][2 * N:3 * N]))
-    #
-    #     print('steer', result['x'][4 * N:5 * N - 1])
-    #     print('a', result['x'][5 * N - 1:6 * N - 2])
-
-    # print_result()
     steer = float(result['x'][4 * N + 1])
     a = float(result['x'][5 * N])
     a = a / MAX_a
     if a > 0:
-        action = Action(steer, a / 10, 0)
+        action = Control(steer, a / 10, 0)
     else:
-        action = Action(steer, 0, -a)
+        action = Control(steer, 0, -a)
 
     if verbose:
         xs = result['x'][0:N].elements()
@@ -245,7 +245,7 @@ def short_term_MPC(ego_car: Car, route_xs, route_ys, dt, verbose=False):
         pprint(xs)
         pprint(ys)
 
-    return action
+    return action, None, None
 
 
 def build_long_term_larget(track, ind, pos, dt, N):
