@@ -1,3 +1,5 @@
+import pickle
+
 import matplotlib.pyplot as plt
 
 
@@ -13,10 +15,21 @@ def plot_waypoints(long_term_pnts, short_term_pnts):
     plt.show()
 
 
-def draw_running_result(track, trajectory):
+def draw_running_result(fname, track, trajectory):
     plt.figure()
     plt.plot(track['x'], track['y'], linewidth=30, color='gray')
     plt.plot(trajectory['x'], trajectory['y'], color='red')
+    plt.savefig(fname, dpi=500)
+    # plt.show()
 
-    plt.show()
 
+if __name__=='__main__':
+
+    mode = "mixed"
+    # with open("../saved/episode_mpc.pkl", "rb") as f:
+    # with open("../saved/episode_mixed.pkl", "rb") as f:
+    with open("../saved/episode_{}.pkl".format(mode), "rb") as f:
+        dic = pickle.load(f)
+        track, trajectory = dic['track'], dic['traj']
+
+    draw_running_result("{}.png".format(mode), track, trajectory)

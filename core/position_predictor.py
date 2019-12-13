@@ -1,21 +1,21 @@
-from collections import deque
+import pickle
+import time
 from functools import reduce
 from math import pi
 from math import sqrt
 
 import gym
+import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
-import numpy as np
 
 from base.control import Control
 from base.environment import Environment
 from dataset.action_position_dataset import ActionPositionDataset
 from nn.expert_policy import long_term_MPC, short_term_MPC
 from nn.simple_action import SimpleNetwork
-from utils.geo import to_relative_coords, to_absolute_coords
-from utils.vis import plot_waypoints
+from utils.geo import to_relative_coords
 
 N = 30
 INF = float('inf')
@@ -27,7 +27,7 @@ MAX_v = 100
 MIN_v = 0
 
 
-def measure_action_diff( pnts1, pnts2):
+def measure_action_diff(pnts1, pnts2):
     return sqrt(sum([(a - b) ** 2 for a, b in zip(pnts1, pnts2)]))
 
 
@@ -44,84 +44,118 @@ class Test:
 
     def run(self):
         self.position_layer.eval()
+        self.env.seed(1024 * 2)
         self.env.reset()
         done = False
-        curr_pos = self.env.get_car().get_position()
-        prev_pos = (curr_pos.x - 10, curr_pos.y + 10)
 
-        # states = deque(maxlen=N)
-        # controls = deque(maxlen=N)
+        track_history, traj_history = dict(), dict()
+        track_history['x'], track_history['y'] = [t[2] for t in self.env.get_track()], [t[3] for t in
+                                                                                        self.env.get_track()]
+        traj_history['x'], traj_history['y'] = [], []
+        # draw_running_result(track_history, traj_history)
+
         cnt = 0
 
+        comp_time = 0
         with torch.no_grad():
-            while not done:
+            for _ in range(2000):
+                start_time = time.time()
                 target_xs, target_ys = self.env.calc_long_term_targets()
                 car_x, car_y, car_vx, car_vy, theta = self.env.observe()
+
+                ind = self.env.get_current_waypoint_index()
+                if ind == len(self.env.get_track()) - 1:
+                    break
+                # track_history['x'].append(track[max(0, ind)][2])
+                # track_history['y'].append(track[max(0, ind)][3])
+                # traj_history['x'].append(car_x)
+                # traj_history['y'].append(car_y)
+
                 rel_long_term_waypoints = to_relative_coords(car_x, car_y, theta, target_xs, target_ys)
 
-                control_traj_pred = self.control_layer(torch.FloatTensor(rel_long_term_waypoints).cuda()).detach().cpu().numpy()
-                # control = Control(control_traj_pred[0], control_traj_pred[1], control_traj_pred[2])
-                # states.append((car_x, car_y, car_vx, car_vy, theta))
-                # controls.append(control_traj_pred)
+                control_traj_pred = self.control_layer(
+                    torch.FloatTensor(rel_long_term_waypoints).cuda()).detach().cpu().numpy()
 
-                # if len(states) == N:
-                #     car_x0, car_y0, car_vx0, car_vy0, theta0 = states[0]
-                #
-                #     s0 = [car_vx0, car_vy0]
-                #     xs = [s[0] for s in states]
-                #     ys = [s[1] for s in states]
-
-                    # x_batch = [tuple(reduce(lambda x, y: x + y, [c.to_tuple() for c in controls])) + s0]
-
-                # positions = to_relative_coords(car_x0, car_y0, theta0, xs, ys)
-                pred_pos = self.position_layer(torch.FloatTensor(np.hstack((control_traj_pred, car_vx, car_vy))).cuda()).detach().cpu().numpy()
+                pred_pos = self.position_layer(
+                    torch.FloatTensor(np.hstack((control_traj_pred, car_vx, car_vy))).cuda()).detach().cpu().numpy()
                 short_term_target_xs = target_xs[:self.short_term_planning_length]
                 short_term_target_ys = target_ys[:self.short_term_planning_length]
-                pred_xs, pred_ys = pred_pos[:len(pred_pos) // 2], pred_pos[len(pred_pos) // 2:]
-                pred_xs, pred_ys = to_absolute_coords(car_x, car_y, theta, short_term_target_xs, short_term_target_ys, False)
-                pred_xs = pred_xs[:self.short_term_planning_length]
-                pred_ys = pred_ys[:self.short_term_planning_length]
 
-                mpc_control, _, _ = self.short_term_mpc(self.env.get_car(), short_term_target_xs, short_term_target_ys, self.dt)
+                mpc_control, _, _ = self.short_term_mpc(self.env.get_car(), short_term_target_xs, short_term_target_ys,
+                                                        self.dt)
                 control_traj_mpc = np.hstack([mpc_control.to_tuple(), control_traj_pred[3:]])
-                pred_pos_mpc = self.position_layer(torch.FloatTensor(np.hstack((control_traj_mpc, car_vx, car_vy))).cuda()).detach().cpu().numpy()
+                pred_pos_mpc = self.position_layer(
+                    torch.FloatTensor(np.hstack((control_traj_mpc, car_vx, car_vy))).cuda()).detach().cpu().numpy()
 
                 target = target_xs + target_ys
                 diff_nn = measure_action_diff(target, pred_pos)
                 diff_mpc = measure_action_diff(target, pred_pos_mpc)
 
-                nn_control = Control(control_traj_pred[0], control_traj_pred[1], control_traj_pred[2])
-
                 if diff_nn > diff_mpc:
                     control = mpc_control
-                    print('mpc', control.to_tuple())
+                    # print('mpc', control.to_tuple())
                 else:
-                    control = nn_control
-                    print('nn', control.to_tuple())
-                # control = mpc_control
-
-                # control, _, _ = self.long_term_mpc(self.env.get_car(), pred_xs, pred_ys, self.dt)
-
-                # if not cnt % 25:
-                #     plot_waypoints(pred_pos, pred_pos_mpc)
+                    control = Control(control_traj_pred[0], control_traj_pred[1], control_traj_pred[2])
+                    # print('nn', control.to_tuple())
                 cnt += 1
-                    # dataset.record(list(controls), s0, positions)
-                    # print("Dataset size: {}".format(cnt))
-                    # cnt += 1
+
+                delta_t = time.time() - start_time
+                comp_time += delta_t
+                print(delta_t)
+                control = mpc_control
+                # control = Control(control_traj_pred[0], control_traj_pred[1], control_traj_pred[2])
 
                 _, _, done, _ = self.env.step(control)
-                # _, _, done, _ = self.env.step(action)
-
-                # Out of lane
-                # curr_pos = self.env.get_car().get_position()
-                # dist = (curr_pos.x - prev_pos[0]) ** 2 + (curr_pos.y - prev_pos[1]) ** 2
-                # # print(dist)
-                # if dist < 5 * 1e-4:  # Hyper parameter
-                #     print("Out of boundary!")
-                #     break
-                # prev_pos = (curr_pos.x, curr_pos.y)
 
                 self.env.render()
+
+        print(comp_time, comp_time / cnt)
+
+        # with open("../saved/episode_nn.pkl", "wb") as f:
+        # with open("../saved/episode_mpc.pkl", "wb") as f:
+        # with open("../saved/episode_mixed.pkl", "wb") as f:
+        #     pickle.dump({"track": track_history, "traj": traj_history}, f)
+
+    def run_long_term(self):
+        self.position_layer.eval()
+        self.env.seed(1024 * 2)
+        self.env.reset()
+        done = False
+
+        track_history, traj_history = dict(), dict()
+        track_history['x'], track_history['y'] = [t[2] for t in self.env.get_track()], [t[3] for t in
+                                                                                        self.env.get_track()]
+        traj_history['x'], traj_history['y'] = [], []
+        # draw_running_result(track_history, traj_history)
+
+        cnt = 0
+
+        comp_time = 0
+        with torch.no_grad():
+            for _ in range(2000):
+                start_time = time.time()
+                target_xs, target_ys = self.env.calc_long_term_targets()
+                car_x, car_y, car_vx, car_vy, theta = self.env.observe()
+
+                ind = self.env.get_current_waypoint_index()
+                if ind == len(self.env.get_track()) - 1:
+                    break
+
+                control, _, _ = self.long_term_mpc(self.env.get_car(), target_xs, target_ys, self.dt)
+
+                cnt += 1
+
+                delta_t = time.time() - start_time
+                comp_time += delta_t
+                print(delta_t)
+                # control = mpc_control
+                control = Control(control_traj_pred[0], control_traj_pred[1], control_traj_pred[2])
+
+                _, _, done, _ = self.env.step(control)
+
+                self.env.render()
+
+        print(comp_time, comp_time / cnt)
 
 
 class ActionController:
@@ -316,8 +350,7 @@ if __name__ == '__main__':
 
     test = Test(env=env, position_layer=position_layer, control_layer=action_layer)
     test.run()
-
+    # test.run_long_term()
     # dagger = ActionController(env)
     # dagger.run_dagger("../cache/action_position_dataset.pkl")
     # dagger.run_dagger()
-

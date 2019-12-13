@@ -32,6 +32,9 @@ class Environment:
         self.car.take_control(control)
         return obs, reward, done, info
 
+    def seed(self, seed_val):
+        self.env.seed(seed_val)
+
     def reset(self):
         state = self.env.reset()
         self.car = Car(self.env.unwrapped.car, 10, 0)

@@ -1,3 +1,4 @@
+import pickle
 from collections import deque
 from functools import reduce
 from math import pi
@@ -33,6 +34,13 @@ class Test:
         self.control_layer = control_layer
 
     def run(self):
+        frame = 0
+
+        track_history, traj_history = dict(), dict()
+        track_history['x'], track_history['y'] = [], []
+        traj_history['x'], traj_history['y'] = [], []
+        track = self.env.get_track()
+
         self.control_layer.eval()
         self.env.reset()
         done = False
@@ -40,8 +48,16 @@ class Test:
         prev_pos = (curr_pos.x - 10, curr_pos.y + 10)
         with torch.no_grad():
             while not done:
+                print("Frame: {}".format(frame))
                 long_term_xs, long_term_ys = self.env.calc_long_term_targets()
                 car_x, car_y, _, _, theta = self.env.observe()
+
+                ind = self.env.get_current_waypoint_index() - 2
+                track_history['x'].append(track[max(0, ind)])
+                track_history['y'].append(track[max(0, ind)])
+                traj_history['x'].append(car_x)
+                traj_history['y'].append(car_y)
+
                 rel_long_term_targets = to_relative_coords(car_x, car_y, theta, long_term_xs, long_term_ys)
                 control_traj = self.control_layer(torch.FloatTensor(rel_long_term_targets).cuda()).detach().cpu().numpy()
 
@@ -56,6 +72,11 @@ class Test:
                 prev_pos = (curr_pos.x, curr_pos.y)
 
                 self.env.render()
+                frame += 1
+
+        with open("../saved/episode.pkl", "wb") as f:
+            pickle.dump({"track": track_history, "traj": track_history})
+
 
 
 class ControlLayerLearner:
@@ -244,7 +265,7 @@ if __name__ == '__main__':
     test = Test(env, control_layer)
     test.run()
 
-    dagger = ControlLayerLearner(env)
-    # dagger.run_dagger()
-    dagger.run_dagger('../cache/control_dataset.pkl')
-    # dagger.run_dagger("action_dataset.pkl")
+    # dagger = ControlLayerLearner(env)
+    # # dagger.run_dagger()
+    # dagger.run_dagger('../cache/control_dataset.pkl')
+    # # dagger.run_dagger("action_dataset.pkl")

@@ -1,8 +1,6 @@
 import pickle
 import random
-from functools import reduce
 
-from base.control import Control
 from typing import Tuple
 
 
@@ -50,4 +48,3 @@ class ActionPositionDataset:
         dataset.states = self.states + other.states
         dataset.rel_position = self.rel_position + other.rel_position
         return dataset
-
